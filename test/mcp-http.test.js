@@ -390,3 +390,95 @@ test('notifications/cancelled interrupts in-flight call, ends phone run, and rot
   assert.equal(nextCall.json.result.content[0].text, 'ok:screen')
   assert.notEqual(bridgeMock.toolCalls[1].caller.runId, bridgeMock.toolCalls[0].caller.runId)
 })
+
+test('插件自带工具（ask_dsh）与手机工具并存，并受 tools.chat 开关控制', async (t) => {
+  const bridgeMock = await startMockPhoneBridge({ useAbstract: false, useTcp: true })
+  let chatEnabled = true
+  const localCalls = []
+
+  const rawConfig = {
+    enabled: true,
+    bindHost: '127.0.0.1',
+    port: 0,
+    endpointPath: '/mcp',
+    allowedCidrs: ['127.0.0.1/32'],
+    tools: {
+      screen: true,
+      apps: true,
+      notify: true,
+      clipboard: true,
+      calendar: true,
+      androidShell: false,
+      diagnostics: false,
+      chat: true,
+      allowUnknownTools: false,
+      disabledTools: [],
+    },
+    session: { idleTimeoutSec: 300, maxSessions: 4, heartbeatIntervalSec: 15 },
+    bridgeConfigPath: bridgeMock.configPath,
+  }
+
+  const bridge = new PhoneBridgeClient({ configPath: bridgeMock.configPath })
+  const gateway = new McpHttpGateway({
+    bridge,
+    getRuntimeConfig: () => {
+      const snapshot = readRuntimeConfig(rawConfig)
+      return { ...snapshot, tools: { ...snapshot.tools, chat: chatEnabled } }
+    },
+    getExpectedToken: async () => 'tok',
+    getLocalTools: () => [
+      {
+        name: 'ask_dsh',
+        description: 'talk to the phone dsh',
+        inputSchema: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] },
+        async handler(args) {
+          localCalls.push(args.message)
+          return { text: `[sess-1]\n\n收到：${args.message}` }
+        },
+      },
+    ],
+  })
+  await gateway.start({ bindHost: '127.0.0.1', port: 0 })
+  const baseUrl = `http://127.0.0.1:${gateway.listenAddress.port}/mcp`
+  const auth = { Authorization: 'Bearer tok' }
+
+  t.after(async () => {
+    await gateway.stop()
+    bridge.close()
+    await bridgeMock.close()
+  })
+
+  const init = await postJson(baseUrl, { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, auth)
+  const sessionHeaders = { ...auth, 'Mcp-Session-Id': init.headers.get('mcp-session-id') }
+
+  // 手机工具和插件自带工具同时出现在 tools/list
+  const list = await postJson(baseUrl, { jsonrpc: '2.0', id: 2, method: 'tools/list' }, sessionHeaders)
+  const names = list.json.result.tools.map((tool) => tool.name)
+  assert.ok(names.includes('screen'), '手机工具仍在')
+  assert.ok(names.includes('ask_dsh'), '插件自带工具应在表里')
+
+  // 调用插件自带工具：不经过 PhoneBridge
+  const call = await postJson(
+    baseUrl,
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ask_dsh', arguments: { message: '你好' } } },
+    sessionHeaders,
+  )
+  assert.equal(call.status, 200)
+  assert.equal(call.json.result.isError, false)
+  assert.ok(call.json.result.content[0].text.includes('收到：你好'))
+  assert.deepEqual(localCalls, ['你好'])
+  assert.equal(bridgeMock.toolCalls.length, 0, 'ask_dsh 不应打到手机 PhoneBridge')
+
+  // 关掉 tools.chat 后：不再列出，直接调用也被拒
+  chatEnabled = false
+  const list2 = await postJson(baseUrl, { jsonrpc: '2.0', id: 4, method: 'tools/list' }, sessionHeaders)
+  assert.ok(!list2.json.result.tools.map((tool) => tool.name).includes('ask_dsh'))
+
+  const denied = await postJson(
+    baseUrl,
+    { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'ask_dsh', arguments: { message: '再问' } } },
+    sessionHeaders,
+  )
+  assert.equal(denied.json.error.code, -32602)
+  assert.deepEqual(localCalls, ['你好'])
+})

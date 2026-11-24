@@ -64,6 +64,7 @@ DSH 插件。把 Android 版 dsh-Go 的手机控制能力（读屏、点击、�
 | `notify` | 开 | `notify` |
 | `clipboard` | 开 | `clipboard` |
 | `calendar` | 开 | `calendar_list` |
+| `chat` | 开 | `ask_dsh`（插件自带，见下） |
 | `androidShell` | 关 | `android_shell` |
 | `diagnostics` | 关 | `diagnostics` |
 | `allowUnknownTools` | 关 | 手机端将来新增、本插件尚未收录的工具 |
@@ -109,6 +110,33 @@ npm test
 
 - 测试使用 Node 内置测试框架，`test/helpers/mock-phone-bridge.mjs` 模拟 Android PhoneBridge。
 - `test/loader.mjs` 优先从本机安装的 `dsh` 中解析 `@deepseek-ai/schemastery` 与 `@deepseek-ai/dsh-credentials`；找不到时使用 `test/stubs/` 下的简化实现。可用环境变量 `DSH_NODE_MODULES` 指定路径。
+
+## 和手机上的 dsh 对话（`ask_dsh`）
+
+插件跑在手机的 dsh 引擎进程里，所以除了代理手机操控工具，它还能直接调 dsh 自己的会话服务，开一条真正的对话通道：
+
+```
+外部 agent ──ask_dsh(message)──▶ 插件 ──sessionController.prompt()──▶ 手机里的 dsh
+                                   ◀──wait() 拿这一轮的助手记录──────┘
+```
+
+- **入参**：`message`（必填）、`session`（可选，dsh 会话 id）、`timeout_sec`（可选）
+- **返回**：这一轮助手产生的文本，首行为 `[会话 id]`；等待超时会标注「以下是已产生的部分答复」
+- **不走手机操控那条路**：不点屏幕、不弹确认框，也不占用手机任务租约
+- **会话策略**：不填 `session` 时用插件自己的专用会话（首次自动新建并复用），不会动你正在聊的那个对话；想指定会话就在配置里填 `chat.sessionId`
+- **依赖**：宿主 dsh 必须提供 `sessionController`（`prompt` / `wait` / `create`）。没有时 `ask_dsh` 不会出现在工具表里，`/phone-mcp` 也会提示一行原因
+- **可取消**：客户端发 `notifications/cancelled` 或断开时，会 abort 等待并在支持时调用 `sessionController.cancel`
+
+| 字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `chat.sessionId` | 空 | 固定对话的 dsh 会话 id；留空用插件自建会话 |
+| `chat.timeoutSec` | `300` | 单次最长等待（30–3600 秒） |
+| `chat.allowNewSession` | `true` | 关闭后必须填 `chat.sessionId` |
+
+## 已知限制
+
+- `type` 工具的 `submit` 在 dsh-Go 的输入框上不一定生效（回车发送可能拿不到系统确认）。要发送消息请再点一次发送控件；这条通道不用于对话，对话请用 `ask_dsh`。
+- 手机息屏/锁屏时 dsh-Go 会中止手机操控任务，`ask_dsh` 不受此限但仍需手机有电、引擎在跑。
 
 ## 兼容性
 
