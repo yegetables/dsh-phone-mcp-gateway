@@ -222,3 +222,47 @@ test('每个 dsh Remote 调用都带上 AbortSignal（宿主内部会 signal.thr
     assert.equal(typeof signal?.throwIfAborted, 'function', `${name} 必须收到 AbortSignal`)
   }
 })
+
+test('extractAssistantText 解包 dsh 的 { type: "event", event: {...} } 外层', () => {
+  assert.equal(
+    extractAssistantText([
+      {
+        type: 'event',
+        event: {
+          type: 'assistant/message',
+          seq: 19,
+          data: { turn: 1, step: 1, message: { role: 'assistant', content: [{ type: 'text', text: '好' }] } },
+        },
+      },
+    ]),
+    '好',
+  )
+})
+
+test('history 只读会话最近答复，不发消息也不新建会话', async () => {
+  const calls = { wait: [], prompt: 0, create: 0 }
+  const controller = {
+    async create() { calls.create += 1; return { sessionId: 'x' } },
+    async prompt() { calls.prompt += 1; return { accepted: true } },
+    async wait(request, _signal) {
+      calls.wait.push(request)
+      return {
+        reason: 'idle',
+        state: { running: false },
+        output: {
+          records: [
+            { type: 'event', event: { type: 'assistant/message', seq: 9, data: { message: { content: [{ type: 'text', text: '之前的答复' }] } } } },
+          ],
+          truncated: false,
+        },
+      }
+    },
+    async state() { return { cursor: 1, running: false } },
+  }
+  const chat = createDshChat({ getSessionController: () => controller, getSettings: () => ({}) })
+  const result = await chat.history({ sessionId: 'session-old' })
+  assert.equal(result.reply, '之前的答复')
+  assert.equal(calls.prompt, 0)
+  assert.equal(calls.create, 0)
+  assert.equal(calls.wait[0].sessionId, 'session-old')
+})
