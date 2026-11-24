@@ -202,3 +202,23 @@ test('ask_dsh 的 debugInfo 给出等待到的原始结构摘要', async () => {
   assert.equal(info.recordCount, 0)
   assert.deepEqual(info.recordTypes, [])
 })
+
+test('每个 dsh Remote 调用都带上 AbortSignal（宿主内部会 signal.throwIfAborted()）', async () => {
+  const seen = []
+  const controller = {
+    async create() { return { sessionId: 'sess-sig' } },
+    async prompt(_r, signal) { seen.push(['prompt', signal]); return { accepted: true } },
+    async state(_r, signal) { seen.push(['state', signal]); return { cursor: 1, running: false } },
+    async wait(_r, signal) {
+      seen.push(['wait', signal])
+      return { reason: 'idle', state: { running: false }, output: { records: [{ type: 'assistant/message', seq: 2, data: { message: { content: [{ type: 'text', text: '好' }] } } }] } }
+    },
+  }
+  const chat = createDshChat({ getSessionController: () => controller, getSettings: () => ({ timeoutMs: 1000 }) })
+  const result = await chat.ask({ message: '你好' })
+  assert.equal(result.reply, '好')
+  assert.ok(seen.length >= 3)
+  for (const [name, signal] of seen) {
+    assert.equal(typeof signal?.throwIfAborted, 'function', `${name} 必须收到 AbortSignal`)
+  }
+})
