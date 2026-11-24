@@ -179,3 +179,26 @@ test('createDshChat：wait 先返回「还没开跑」的空结果时，会等�
   assert.equal(result.reply, '跑完了的答复')
   assert.ok(calls.wait.length >= 2, '空结果后应再等一次，而不是直接返回空')
 })
+
+test('extractAssistantText 对未知事件结构也能递归取到文本块', () => {
+  assert.equal(
+    extractAssistantText([
+      { type: 'assistant/message', seq: 2, data: { content: [{ type: 'text', text: '在 data.content 里' }] } },
+      { type: 'assistant/message', seq: 1, data: { message: { content: [{ type: 'text', text: '在 data.message.content 里' }] } } },
+      { type: 'tool/result', seq: 3, data: { message: { content: [{ type: 'text', text: '工具结果不该算答复' }] } } },
+    ]),
+    '在 data.message.content 里\n\n在 data.content 里',
+  )
+})
+
+test('ask_dsh 的 debugInfo 给出等待到的原始结构摘要', async () => {
+  const controller = fakeController({
+    waitResult: { reason: 'idle', state: { running: false, cursor: 5 }, output: { records: [], truncated: false } },
+  })
+  const chat = createDshChat({ getSessionController: () => controller, getSettings: () => ({ timeoutMs: 500 }) })
+  const result = await chat.ask({ message: '你好' })
+  const info = JSON.parse(result.debugInfo)
+  assert.equal(info.reason, 'idle')
+  assert.equal(info.recordCount, 0)
+  assert.deepEqual(info.recordTypes, [])
+})
