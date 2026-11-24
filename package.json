@@ -1,6 +1,6 @@
 {
   "name": "dsh-phone-mcp-gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "DSH plugin that exposes Android dsh-Go phone control as a standard Streamable HTTP MCP server for external agents.",
   "license": "MIT",

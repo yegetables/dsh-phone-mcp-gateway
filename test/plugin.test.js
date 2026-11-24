@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
-import { apply, inject, name } from '../lib/index.js'
+import { apply, inject, name, start } from '../lib/index.js'
 import { CREDENTIAL_REF } from '../lib/config.js'
 import { startMockPhoneBridge } from './helpers/mock-phone-bridge.mjs'
 
@@ -89,7 +89,7 @@ test('plugin exports standard Cordis metadata and handles volatile toggle, token
     bridgeConfigPath: bridgeMock.configPath,
   }
 
-  const instance = await apply(ctx, config)
+  const instance = await start(ctx, config)
   t.after(async () => {
     await ctx.disposeAll()
     await bridgeMock.close()
@@ -149,4 +149,23 @@ test('plugin exports standard Cordis metadata and handles volatile toggle, token
   await instance.syncListenerState()
   assert.equal(instance.gateway.listening, true)
   assert.ok(sessionId)
+})
+
+test('apply 遵守 Cordis 契约：async 回调必须 resolve 成 void（返回对象会触发 TypeError: Invalid effect）', async (t) => {
+  const ctx = createMockContext('tok')
+  const config = {
+    enabled: { get: () => false },
+    bindHost: '127.0.0.1',
+    port: 0,
+    endpointPath: '/mcp',
+    auth: { get: () => ({ credentialRef: CREDENTIAL_REF, token: '' }) },
+    allowedCidrs: { get: () => ['127.0.0.1/32'] },
+    tools: { get: () => ({ screen: true, apps: true, notify: true, clipboard: true, calendar: true, androidShell: false, diagnostics: false, disableTools: [], disabledTools: [] }) },
+    session: { get: () => ({ idleTimeoutSec: 300, maxSessions: 4, heartbeatIntervalSec: 15 }) },
+    bridgeConfigPath: '/nonexistent/bridge.json',
+  }
+  t.after(() => ctx.disposeAll())
+
+  const returned = await apply(ctx, config)
+  assert.equal(returned, undefined, 'apply 不能返回运行句柄：Cordis 会把它当非法 effect')
 })

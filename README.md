@@ -110,6 +110,13 @@ npm test
 - 测试使用 Node 内置测试框架，`test/helpers/mock-phone-bridge.mjs` 模拟 Android PhoneBridge。
 - `test/loader.mjs` 优先从本机安装的 `dsh` 中解析 `@deepseek-ai/schemastery` 与 `@deepseek-ai/dsh-credentials`；找不到时使用 `test/stubs/` 下的简化实现。可用环境变量 `DSH_NODE_MODULES` 指定路径。
 
+## 兼容性
+
+针对 DSH 0.2.2 系列的两处适配（0.1.1 起）：
+
+1. **`apply` 必须 resolve 成 void。** Cordis 把插件回调的返回值当 effect 校验：返回对象会抛 `TypeError: Invalid effect`（只有函数、thenable、迭代器合法）。所以 `apply` 只转发，真正的初始化在 `start()` 里，由测试和调试调用。
+2. **`ctx.credentials.resolve()` 返回 `{ value, source } | undefined`**，不是字符串。`lib/credentials.js` 两种形式都接受，避免把已配置的密钥误判成未配置（那样网关会一直返回 503）。
+
 ## 许可
 
 MIT
