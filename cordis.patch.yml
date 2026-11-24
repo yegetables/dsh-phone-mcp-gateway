@@ -1,0 +1,3 @@
+- insert:
+    - id: phone-mcp-gateway
+      name: dsh-phone-mcp-gateway

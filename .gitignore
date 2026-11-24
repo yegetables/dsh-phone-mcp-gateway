@@ -1,0 +1,7 @@
+node_modules/
+.opencode/
+.bak/
+*.bak.*
+.DS_Store
+coverage/
+*.tgz
