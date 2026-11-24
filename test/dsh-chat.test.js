@@ -134,3 +134,48 @@ test('createDshChat：宿主没有 sessionController 时给出 CHAT_UNAVAILABLE'
     return true
   })
 })
+
+test('createDshChat：wait 先返回「还没开跑」的空结果时，会等这一轮真正跑完再取答复', async () => {
+  const calls = { prompt: [], wait: [], state: [] }
+  let waitCount = 0
+  let running = false
+  const controller = {
+    async create() { return { sessionId: 'sess-race' } },
+    async prompt(request) { calls.prompt.push(request); return { accepted: true } },
+    async state() {
+      calls.state.push(Date.now())
+      // 第一次是读游标（未 running），prompt 之后第二轮才会 running
+      return { cursor: 3, running }
+    },
+    async wait(request) {
+      calls.wait.push(request)
+      waitCount += 1
+      if (waitCount === 1) {
+        // 这一轮还没开跑：立刻返回 idle 且没有新记录
+        return { reason: 'idle', state: { running: false }, output: { records: [], truncated: false } }
+      }
+      return {
+        reason: 'idle',
+        state: { running: false },
+        output: { records: [{ type: 'assistant/message', seq: 5, data: { message: { content: [{ type: 'text', text: '跑完了的答复' }] } } }], truncated: false },
+      }
+    },
+    async cancel() { return { cancelled: true } },
+  }
+
+  const chat = createDshChat({
+    getSessionController: () => controller,
+    getSettings: () => ({ timeoutMs: 5000 }),
+  })
+
+  // prompt 之后让 state 报告 running，模拟这一轮开跑
+  const originalPrompt = controller.prompt
+  controller.prompt = async (request) => {
+    running = true
+    return originalPrompt(request)
+  }
+
+  const result = await chat.ask({ message: '你好' })
+  assert.equal(result.reply, '跑完了的答复')
+  assert.ok(calls.wait.length >= 2, '空结果后应再等一次，而不是直接返回空')
+})
